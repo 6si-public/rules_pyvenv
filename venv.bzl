@@ -64,7 +64,7 @@ _py_venv_deps = rule(
     toolchains = [PYTHON_TOOLCHAIN_TYPE],
 )
 
-def py_venv(name, deps = None, data = None, extra_pip_commands = None, always_link = False, venv_location = None, **kwargs):
+def py_venv(name, deps = None, data = None, extra_pip_commands = None, always_link = False, venv_location = None, python_version = None, **kwargs):
     deps = deps or []
     data = data or []
     extra_pip_commands = extra_pip_commands or []
@@ -89,6 +89,10 @@ def py_venv(name, deps = None, data = None, extra_pip_commands = None, always_li
     if venv_location:
         env.update({"VENV_LOCATION": venv_location})
 
+    py_binary_kwargs = dict(kwargs)
+    if python_version != None:
+        py_binary_kwargs["python_version"] = python_version
+
     py_binary(
         name = name,
         srcs = ["@rules_pyvenv//:build_env.py"],
@@ -96,5 +100,5 @@ def py_venv(name, deps = None, data = None, extra_pip_commands = None, always_li
         data = [out_label] + deps + data,
         main = "@rules_pyvenv//:build_env.py",
         env = env,
-        **kwargs,
+        **py_binary_kwargs,
     )
