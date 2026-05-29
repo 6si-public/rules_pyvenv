@@ -30,7 +30,8 @@ py_venv(
     ],
     extra_pip_commands = [
 #        "install ipython jupyter-console",
-    ]
+    ],
+    # python_version = "3.11",  # uncomment to pin the Python toolchain version
 )
 
 py_venv(
