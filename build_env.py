@@ -13,15 +13,18 @@
 # limitations under the License.
 
 from enum import Enum
+import csv
 import itertools
 import json
 import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
 import textwrap
 import venv
-from typing import Dict, List, NamedTuple
+from typing import Dict, List, NamedTuple, Set
 
 import importlib_metadata
 
@@ -170,6 +173,70 @@ def install_site_file(site_packages_path: pathlib.Path, file: EnvFile) -> None:
         site_path.symlink_to(file.path.resolve())
 
 
+def dist_name(dist_info_dir: str) -> str:
+    # "<name>-<version>.dist-info" -> PEP 503 normalized "<name>".
+    name = dist_info_dir[: -len(".dist-info")].rsplit("-", 1)[0]
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def get_provided_dists(files: List[EnvFile]) -> Set[str]:
+    return {
+        dist_name(file.env_path.parts[0])
+        for file in files
+        if not is_data_file(file)
+        and len(file.env_path.parts) > 1
+        and file.env_path.parts[0].endswith(".dist-info")
+    }
+
+
+def remove_seeded_dists(env_path: pathlib.Path, provided: Set[str]) -> None:
+    # The venv is created with the interpreter's bundled pip (and setuptools before
+    # Python 3.12). install_site_file never replaces an existing file, so linking a
+    # different version of one of these from deps would leave a mix of both versions'
+    # files and two dist-info dirs. Remove the bundled copy, using its RECORD, for every
+    # distribution that deps also provide.
+    env_root = pathlib.Path(os.path.normpath(env_path))
+    site_packages_path = pathlib.Path(os.path.normpath(find_site_packages(env_path)))
+    for dist_info in sorted(site_packages_path.glob("*.dist-info")):
+        if dist_name(dist_info.name) not in provided:
+            continue
+
+        record = dist_info / "RECORD"
+        if not record.exists():
+            print(
+                f"Warning: [{dist_info.name}] has no RECORD; "
+                "keeping it alongside the version from deps"
+            )
+            continue
+
+        print(f"Replacing venv-bundled [{dist_info.name}] with the version from deps")
+        dirs = set()
+        with record.open(newline="") as f:
+            for row in csv.reader(f):
+                if not row:
+                    continue
+                path = pathlib.Path(os.path.normpath(site_packages_path / row[0]))
+                # RECORD paths are relative to site-packages and can point into bin/;
+                # never touch anything outside the venv.
+                if not path_starts_with(path, env_root):
+                    continue
+                if path.is_file() or path.is_symlink():
+                    path.unlink()
+                    dirs.add(path.parent)
+        shutil.rmtree(dist_info, ignore_errors=True)
+
+        # Prune the package directories (and their __pycache__) left empty, deepest first.
+        for directory in sorted(dirs, key=lambda d: len(d.parts), reverse=True):
+            while directory != site_packages_path and path_starts_with(
+                directory, site_packages_path
+            ):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    break
+                directory = directory.parent
+
+
 def install_files(env_path: pathlib.Path, files: List[EnvFile]) -> None:
     site_packages_path = find_site_packages(env_path)
     for file in files:
@@ -273,6 +340,7 @@ def main():
     builder = venv.EnvBuilder(clear=True, symlinks=True, with_pip=True)
     builder.create(str(env_path))
 
+    remove_seeded_dists(env_path, get_provided_dists(files))
     install_files(env_path, files)
     generate_console_scripts(env_path)
 

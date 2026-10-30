@@ -25,6 +25,10 @@ apt install python3.8-venv
 
 On Windows, [you need to enable symlink support](https://bazel.build/configure/windows#symlink).
 
+The venv starts with the pip (and, before Python 3.12, setuptools) bundled with the interpreter.
+If `deps` also provide pip or setuptools, the bundled copy is removed first, so the venv contains
+only the version from `deps`.
+
 ## Example
 ```
 $ cd example
